@@ -12,9 +12,18 @@ from dataclasses import dataclass
 @dataclass
 class ValuePointer:
     timestamp: float
+    expiration: float
     offset: int
     size: int
     encoding: str
+
+    def mark_expired(self) -> bool:
+        self.expiration = 0
+
+    def is_expired(self) -> bool:
+        if self.expiration < 0:
+            return False
+        return get_timestamp() > self.expiration
 
 
 def is_builtin_type(obj):
@@ -45,9 +54,10 @@ class Database:
                     offset=record['offset'],
                     size=record['size'],
                     encoding=record['encoding'],
+                    expiration=-1 if 'expiration' not in record else record['expiration']
                 )
             else:
-                del self._table[record['key']]
+                self._table[record['key']].mark_expired()
 
             json_record = self._key_file.readline()
 
@@ -94,12 +104,16 @@ class Database:
             data = data + b":" + encoded_value
         return zlib.crc32(data)
 
-    def _get(self, key: str):
-        ptr = self._table.get(key)
-        if ptr is None:
-            return None
+    def _is_none_or_expired(self, key):
+        ptr = self._table[key]
+        if ptr is None or ptr.is_expired():
+            return True
+        return False
 
-        return self._read_value(ptr)
+    def _get(self, key: str):
+        if self._is_none_or_expired(key):
+            return None
+        return self._read_value(self._table[key])
 
     def _set(self, key, value):
         offset = self._seek_to_end()
@@ -120,10 +134,14 @@ class Database:
             timestamp=record['timestamp'],
             offset=offset,
             size=len(encoded_value),
-            encoding=encoding
+            encoding=encoding,
+            expiration=-1
         )
 
     def _del(self, key):
+        if self._is_none_or_expired(key):
+            return None
+
         self._seek_to_end()
         record = {
             'type': 'del',
@@ -132,7 +150,7 @@ class Database:
         }
         record['checksum'] = self._checksum(record)
         self._append_record(record)
-        del self._table[key]
+        self._table[key].mark_expired()
 
     def __getitem__(self, key: str):
         with self._lock:
@@ -145,3 +163,4 @@ class Database:
     def __delitem__(self, key: str):
         with self._lock:
             self._del(key)
+
