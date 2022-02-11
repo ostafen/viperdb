@@ -30,7 +30,7 @@ def get_timestamp():
     return datetime.datetime.now().timestamp()
 
 
-class Database:
+class ViperDB:
     def __init__(self, path: str):
         self._lock = threading.Lock()
         self._path = path
@@ -41,7 +41,12 @@ class Database:
         self._key_file = open(f'{self._path}/db.klog', 'a+')
         self._value_file = open(f'{self._path}/db.vlog', 'ba+')
 
+    def _flush(self):
+        self._key_file.flush()
+        self._value_file.flush()
+
     def _close_files(self):
+        self._flush()
         self._key_file.close()
         self._value_file.close()
 
@@ -225,3 +230,10 @@ class Database:
     def reclaim(self):
         with self._lock:
             self._reclaim()
+
+    def _close(self):
+        self._close_files()
+
+    def close(self):
+        with self._lock:
+            self._close()
