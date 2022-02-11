@@ -4,7 +4,7 @@ import os
 import pickle
 import threading
 import zlib
-from typing import Any, Dict, Optional, Hashable
+from typing import Any, Dict, Hashable
 from dataclasses import dataclass
 
 
@@ -27,7 +27,7 @@ def is_builtin_type(obj):
 
 
 def get_timestamp():
-    return datetime.datetime.now().timestamp()
+    return int(datetime.datetime.now().timestamp() * 1000)
 
 
 class ViperDB:
@@ -35,6 +35,10 @@ class ViperDB:
         self._lock = threading.Lock()
         self._path = path
         self._table = {}
+        self._init_db()
+
+    def _reopen(self):
+        self._close()
         self._init_db()
 
     def _open_files(self):
@@ -140,7 +144,7 @@ class ViperDB:
             return None
         return self._read_value(self._table[key])
 
-    def _set(self, key: Hashable, value: Any):
+    def _set(self, key: Hashable, value: Any, expiration=-1):
         offset = self._seek_to_end()
         encoded_value = self._encode_value(value)
         encoding = self._get_encoding(value)
@@ -152,6 +156,9 @@ class ViperDB:
             'offset': offset,
             'size': len(encoded_value)
         }
+        if expiration >= 0:
+            record['expiration'] = expiration
+
         record['checksum'] = self._checksum(record, encoded_value)
         self._append_record(record)
         self._value_file.write(encoded_value)
@@ -160,8 +167,12 @@ class ViperDB:
             offset=offset,
             size=len(encoded_value),
             encoding=encoding,
-            expiration=-1
+            expiration=expiration
         )
+
+    def set_with_expiration(self, key: Hashable, value: Any, expiration: int):
+        with self._lock:
+            self._set(key, value, expiration=expiration)
 
     def _del(self, key: Hashable):
         if self._is_none_or_expired(key):
@@ -189,9 +200,6 @@ class ViperDB:
     def __delitem__(self, key: Hashable):
         with self._lock:
             self._del(key)
-
-    def _is_fresh(self, ptr: Optional[ValuePointer], record):
-        return ptr is not None and ptr.timestamp == record['timestamp']
 
     def _reclaim(self):
         new_key_file = open(f'{self._path}/db.klog.tmp', 'a+')
@@ -233,6 +241,7 @@ class ViperDB:
 
     def _close(self):
         self._close_files()
+        self._table.clear()
 
     def close(self):
         with self._lock:
