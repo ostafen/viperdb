@@ -201,6 +201,10 @@ class ViperDB:
         with self._lock:
             self._del(key)
 
+    def __contains__(self, key: Hashable):
+        with self._lock:
+            return not self._is_none_or_expired(key)
+
     def _reclaim(self):
         new_key_file = open(f'{self._path}/db.klog.tmp', 'a+')
         new_value_file = open(f'{self._path}/db.vlog.tmp', 'ba+')
