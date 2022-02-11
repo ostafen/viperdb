@@ -1,3 +1,6 @@
+import datetime
+import time
+
 from db import ViperDB
 import pytest
 import shutil
@@ -17,6 +20,35 @@ def test_insert_key(db: ViperDB):
     for i in range(n):
         db[i] = i+1
         assert db[i] == i+1
+
+
+def get_expiration(seconds: int):
+    return int((datetime.datetime.now() + datetime.timedelta(seconds=seconds)).timestamp()*1000)
+
+
+def test_insert_with_expiration(db: ViperDB):
+    expiration = get_expiration(1)
+    expiration_long = get_expiration(10)
+
+    n = 1000
+    for i in range(n):
+        db.set_with_expiration(i, i+1, expiration if i % 2 == 0 else expiration_long)
+        assert db[i] == i + 1
+
+    time.sleep(1)
+
+    def run_check():
+        for j in range(n):
+            if j % 2 == 0:
+                assert db[j] is None
+            else:
+                assert db[j] == j + 1
+
+    run_check()
+
+    db.reclaim()
+
+    run_check()
 
 
 class MyClass:
@@ -41,20 +73,24 @@ def test_remove_key(db: ViperDB):
     for i in range(n):
         db[i] = i + 1
 
+    # delete even keys
     for i in range(n):
         if i % 2 == 0:
             del db[i]
 
-    for i in range(n):
-        if i % 2 == 0:
-            assert db[i] is None
-        else:
-            assert db[i] == i+1
+    def run_check():
+        for i in range(n):
+            if i % 2 == 0:
+                assert db[i] is None
+            else:
+                assert db[i] == i+1
+
+    run_check()
+
+    db._reopen()
+
+    run_check()
 
     db.reclaim()
 
-    for i in range(n):
-        if i % 2 == 0:
-            assert db[i] is None
-        else:
-            assert db[i] == i+1
+    run_check()
