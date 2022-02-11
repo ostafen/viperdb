@@ -1,11 +1,10 @@
-import base64
 import datetime
 import json
 import os
 import pickle
 import threading
 import zlib
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from dataclasses import dataclass
 
 
@@ -16,9 +15,6 @@ class ValuePointer:
     offset: int
     size: int
     encoding: str
-
-    def mark_expired(self) -> bool:
-        self.expiration = 0
 
     def is_expired(self) -> bool:
         if self.expiration < 0:
@@ -37,12 +33,32 @@ def get_timestamp():
 class Database:
     def __init__(self, path: str):
         self._lock = threading.Lock()
-        self._key_file = open(f'{path}/db.klog', 'a+')
-        self._value_file = open(f'{path}/db.vlog', 'ba+')
+        self._path = path
         self._table = {}
         self._init_db()
 
+    def _open_files(self):
+        self._key_file = open(f'{self._path}/db.klog', 'a+')
+        self._value_file = open(f'{self._path}/db.vlog', 'ba+')
+
+    def _close_files(self):
+        self._key_file.close()
+        self._value_file.close()
+
+    def _swap_files(self, new_key_file, new_value_file):
+        self._close_files()
+
+        os.rename(new_key_file.name, self._key_file.name)
+        os.rename(new_value_file.name, self._value_file.name)
+
+        self._key_file = new_key_file
+        self._value_file = new_value_file
+
+        self._close_files()
+        self._open_files()
+
     def _init_db(self):
+        self._open_files()
         self._key_file.seek(0)
 
         json_record = self._key_file.readline()
@@ -57,14 +73,16 @@ class Database:
                     expiration=-1 if 'expiration' not in record else record['expiration']
                 )
             else:
-                self._table[record['key']].mark_expired()
+                del self._table[record['key']]
 
             json_record = self._key_file.readline()
 
-    def _read_value(self, ptr: ValuePointer):
+    def _read_value(self, ptr: ValuePointer, decode=True):
         self._value_file.seek(ptr.offset)
         encoded_value = self._value_file.read(ptr.size)
-        return self._decode_value(encoded_value, ptr.encoding)
+        if decode:
+            return self._decode_value(encoded_value, ptr.encoding)
+        return encoded_value
 
     def _seek_to_end(self):
         self._key_file.seek(0, os.SEEK_END)
@@ -105,7 +123,7 @@ class Database:
         return zlib.crc32(data)
 
     def _is_none_or_expired(self, key):
-        ptr = self._table[key]
+        ptr = self._table.get(key)
         if ptr is None or ptr.is_expired():
             return True
         return False
@@ -143,14 +161,15 @@ class Database:
             return None
 
         self._seek_to_end()
+        timestamp = get_timestamp()
         record = {
             'type': 'del',
-            'timestamp': get_timestamp(),
+            'timestamp': timestamp,
             'key': key
         }
         record['checksum'] = self._checksum(record)
         self._append_record(record)
-        self._table[key].mark_expired()
+        del self._table[key]
 
     def __getitem__(self, key: str):
         with self._lock:
@@ -164,3 +183,43 @@ class Database:
         with self._lock:
             self._del(key)
 
+    def _is_fresh(self, ptr: Optional[ValuePointer], record):
+        return ptr is not None and ptr.timestamp == record['timestamp']
+
+    def _reclaim(self):
+        new_key_file = open(f'{self._path}/db.klog.tmp', 'a+')
+        new_value_file = open(f'{self._path}/db.vlog.tmp', 'ba+')
+
+        expired_keys = []
+        for key, ptr in self._table.items():
+            if ptr.is_expired():
+                expired_keys.append(key)
+                continue
+
+            offset = new_value_file.tell()
+            value = self._read_value(ptr, decode=False)
+            new_value_file.write(value)
+
+            new_record = {
+                'type': 'set',
+                'timestamp': ptr.timestamp,
+                'key': key,
+                'encoding': ptr.encoding,
+                'offset': offset,
+                'size': ptr.size,
+            }
+            if ptr.expiration >= 0:
+                new_record['expiration'] = ptr.expiration
+            new_record['checksum'] = self._checksum(new_record, value)
+            ptr.offset = offset
+
+            new_key_file.write(json.dumps(new_record) + '\n')
+
+        self._swap_files(new_key_file, new_value_file)
+
+        for key in expired_keys:
+            del self._table[key]
+
+    def reclaim(self):
+        with self._lock:
+            self._reclaim()
