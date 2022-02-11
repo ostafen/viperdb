@@ -19,6 +19,7 @@ def test_insert_key(db: ViperDB):
     n = 1000
     for i in range(n):
         db[i] = i+1
+        assert i in db
         assert db[i] == i+1
 
 
@@ -81,7 +82,7 @@ def test_remove_key(db: ViperDB):
     def run_check():
         for i in range(n):
             if i % 2 == 0:
-                assert db[i] is None
+                assert i not in db
             else:
                 assert db[i] == i+1
 
