@@ -97,19 +97,19 @@ class ViperDB:
         return self._value_file.tell()
 
     def _encode_value(self, value) -> bytes:
+        if type(value) == bytes:
+            return value
+
         if is_builtin_type(value):
             return json.dumps(value).encode('ascii')
 
-        if type(value) != bytes:
-            return pickle.dumps(value)
-
-        return value
+        return pickle.dumps(value)
 
     def _get_encoding(self, value):
-        if is_builtin_type(value):
-            return 'json'
-        elif type(value) == bytes:
+        if type(value) == bytes:
             return 'bytes'
+        elif is_builtin_type(value):
+            return 'json'
         return 'pickle'
 
     def _decode_value(self, encoded_value, encoding):
