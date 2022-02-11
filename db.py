@@ -4,7 +4,7 @@ import os
 import pickle
 import threading
 import zlib
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Hashable
 from dataclasses import dataclass
 
 
@@ -135,15 +135,15 @@ class ViperDB:
             return True
         return False
 
-    def _get(self, key: str):
+    def _get(self, key: Hashable):
         if self._is_none_or_expired(key):
             return None
         return self._read_value(self._table[key])
 
-    def _set(self, key, value):
+    def _set(self, key: Hashable, value: Any):
         offset = self._seek_to_end()
         encoded_value = self._encode_value(value)
-        encoding = self._get_encoding(encoded_value)
+        encoding = self._get_encoding(value)
         record = {
             'type': 'set',
             'timestamp': get_timestamp(),
@@ -163,7 +163,7 @@ class ViperDB:
             expiration=-1
         )
 
-    def _del(self, key):
+    def _del(self, key: Hashable):
         if self._is_none_or_expired(key):
             return None
 
@@ -178,15 +178,15 @@ class ViperDB:
         self._append_record(record)
         del self._table[key]
 
-    def __getitem__(self, key: str):
+    def __getitem__(self, key: Hashable):
         with self._lock:
             return self._get(key)
 
-    def __setitem__(self, key: str, value: Any):
+    def __setitem__(self, key: Hashable, value: Any):
         with self._lock:
             self._set(key, value)
 
-    def __delitem__(self, key: str):
+    def __delitem__(self, key: Hashable):
         with self._lock:
             self._del(key)
 
