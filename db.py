@@ -58,6 +58,8 @@ class Database:
         self._open_files()
 
     def _init_db(self):
+        os.makedirs(self._path, exist_ok=True)
+
         self._open_files()
         self._key_file.seek(0)
 
