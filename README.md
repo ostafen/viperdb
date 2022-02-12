@@ -12,6 +12,15 @@ It has been designed for being extremely simple while efficient.
 - **log-structured**: ViperDB takes design concepts by log-structured databases such as [Bitcask](https://docs.riak.com/riak/kv/2.2.3/setup/planning/backend/bitcask/index.html).
 - **written in pure Python**: no external dependency needed.
 
+### Installation
+
+```bash
+foo@bar:~$ pip3 install viperdb
+```
+
+### Python version
+ViperDB has been tested with Python 3.8.
+
 ### Database layout
 
 ViperDB simply consists of two files: a **key log file** and a **value log file**.
