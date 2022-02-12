@@ -2,7 +2,7 @@ import datetime
 import os
 import time
 
-from db import ViperDB
+from viperdb import ViperDB
 import pytest
 import shutil
 from secrets import token_bytes
@@ -10,9 +10,8 @@ from secrets import token_bytes
 
 @pytest.fixture
 def db(tmp_path):
-    _db = ViperDB(tmp_path.name)
-    yield _db
-    _db.close()
+    with ViperDB(tmp_path.name) as _db:
+        yield _db
     shutil.rmtree(tmp_path.name)
 
 
