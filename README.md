@@ -35,7 +35,8 @@ assert db['hello'] == 'ViperDB'
 del db['hello']
 assert 'hello' not in db
 
-db.reclaim() # call this method periodically to free unused space
+db.reclaim() # call this method periodically to free unused space.
+db.close() # flush any pending write and close the database.
 ```
 
 ### Contribute
