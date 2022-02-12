@@ -115,7 +115,9 @@ class ViperDB:
         while json_entry.strip() != '':
             entry = json.loads(json_entry)
             if entry['type'] == 'set':
-                self._table[entry['key']] = ValuePointer.from_entry(entry)
+                ptr = ValuePointer.from_entry(entry)
+                if not ptr.is_expired():
+                    self._table[entry['key']] = ptr
             else:
                 del self._table[entry['key']]
 
