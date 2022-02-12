@@ -49,6 +49,12 @@ class ViperDB:
         self._table = {}
         self._init_db()
 
+    def _key_filename(self):
+        return f'{self._path}/db.klog'
+
+    def _value_filename(self):
+        return f'{self._path}/db.vlog'
+
     def _open_filename(self):
         return f'{self._path}/{DB_OPEN_FILE}'
 
@@ -57,8 +63,8 @@ class ViperDB:
         self._init_db()
 
     def _open_files(self):
-        self._key_file = open(f'{self._path}/db.klog', 'a+')
-        self._value_file = open(f'{self._path}/db.vlog', 'ba+')
+        self._key_file = open(self._key_filename(), 'a+')
+        self._value_file = open(self._value_filename(), 'ba+')
 
     def _flush(self):
         self._key_file.flush()
@@ -68,6 +74,13 @@ class ViperDB:
         self._flush()
         self._key_file.close()
         self._value_file.close()
+
+    def _create_temp_files(self):
+        new_key_file = open(f'{self._key_filename()}.tmp', 'a+')
+        new_value_file = open(f'{self._value_filename()}.tmp', 'ba+')
+        new_key_file.truncate()
+        new_value_file.truncate()
+        return new_key_file, new_value_file
 
     def _swap_files(self, new_key_file, new_value_file):
         self._close_files()
@@ -219,8 +232,7 @@ class ViperDB:
             return not self._is_none_or_expired(key)
 
     def _reclaim(self):
-        new_key_file = open(f'{self._path}/db.klog.tmp', 'a+')
-        new_value_file = open(f'{self._path}/db.vlog.tmp', 'ba+')
+        new_key_file, new_value_file = self._create_temp_files()
 
         expired_keys = []
         for key, ptr in self._table.items():
@@ -257,11 +269,7 @@ class ViperDB:
             self._close()
 
     def _repair_db(self):
-        new_key_file = open(f'{self._path}/db.klog.tmp', 'a+')
-        new_value_file = open(f'{self._path}/db.vlog.tmp', 'ba+')
-
-        new_key_file.truncate()
-        new_value_file.truncate()
+        new_key_file, new_value_file = self._create_temp_files()
 
         self._key_file.seek(0)
 
