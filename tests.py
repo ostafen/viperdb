@@ -1,4 +1,5 @@
 import datetime
+import os
 import time
 
 from db import ViperDB
@@ -95,3 +96,73 @@ def test_remove_key(db: ViperDB):
     db.reclaim()
 
     run_check()
+
+
+def test_recover_database1(db: ViperDB):
+    n = 1000
+    for i in range(n):
+        db[i] = i+1
+
+    key_file = db._key_file
+    key_file.seek(0)
+
+    new_key_file = open(key_file.name + '.damaged', 'a+')
+
+    # copy all but the last entry
+    json_entry = key_file.readline()
+    last_entry = json_entry
+    while json_entry.strip() != '':
+        last_entry = json_entry
+        json_entry = key_file.readline()
+
+        if json_entry.strip() != '':
+            new_key_file.write(last_entry)
+
+    damaged_entry = last_entry.strip()[:(len(last_entry)//2)]    # take the half of the entry
+    new_key_file.write(damaged_entry + '\n')
+
+    new_key_file.flush()
+    new_key_file.close()
+    os.rename(new_key_file.name, key_file.name)
+
+    db.close()
+
+    # create the .OPEN file, so that repair is triggered
+    with open(db._open_filename(), 'w'):
+        pass
+
+    db._init_db()
+
+    for i in range(n-1):
+        assert db[i] == i+1
+
+    assert db[n-1] is None
+
+
+def test_recover_database2(db: ViperDB):
+    n = 1000
+    for i in range(n):
+        db[i] = i+1
+
+    ptr = db._table[n - 1]
+
+    value_file = db._value_file
+    value_file.close()
+    value_file = open(f'{db._path}/db.vlog', 'br+')
+    value_file.seek(ptr.offset)
+    value_file.write(b'abcd')
+
+    db._value_file = value_file
+
+    db.close()
+
+    # create the .OPEN file, so that repair is triggered
+    with open(db._open_filename(), 'w'):
+        pass
+
+    db._init_db()
+
+    for i in range(n-1):
+        assert db[i] == i+1
+
+    assert db[n-1] is None

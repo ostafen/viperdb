@@ -4,20 +4,29 @@ import os
 import pickle
 import threading
 import zlib
-from typing import Any, Dict, Hashable
-from dataclasses import dataclass
+from typing import Any, Dict, Hashable, Optional
+from dataclasses import dataclass, fields, asdict
 
 
 @dataclass
 class ValuePointer:
     timestamp: float
-    expiration: float
+    expiration: Optional[float]
     offset: int
     size: int
     encoding: str
 
+    @classmethod
+    def from_entry(cls, entry):
+        class_fields = {f.name for f in fields(cls)}
+        return ValuePointer(**{k: entry.get(k) for k in class_fields})
+
+    def as_dict(self):
+        _dict = asdict(self)
+        return {k: v for k, v in _dict.items() if v is not None}
+
     def is_expired(self) -> bool:
-        if self.expiration < 0:
+        if self.expiration is None:
             return False
         return get_timestamp() > self.expiration
 
@@ -30,12 +39,18 @@ def get_timestamp():
     return int(datetime.datetime.now().timestamp() * 1000)
 
 
+DB_OPEN_FILE = '.OPEN'
+
+
 class ViperDB:
     def __init__(self, path: str):
         self._lock = threading.Lock()
         self._path = path
         self._table = {}
         self._init_db()
+
+    def _open_filename(self):
+        return f'{self._path}/{DB_OPEN_FILE}'
 
     def _reopen(self):
         self._close()
@@ -44,6 +59,13 @@ class ViperDB:
     def _open_files(self):
         self._key_file = open(f'{self._path}/db.klog', 'a+')
         self._value_file = open(f'{self._path}/db.vlog', 'ba+')
+
+    def _remove_temp_files(self):
+        if os.path.exists(f'{self._path}/db.klog.tmp'):
+            os.remove(f'{self._path}/db.klog.tmp')
+
+        if os.path.exists(f'{self._path}/db.vlog.tmp'):
+            os.remove(f'{self._path}/db.vlog.tmp')
 
     def _flush(self):
         self._key_file.flush()
@@ -66,27 +88,32 @@ class ViperDB:
         self._close_files()
         self._open_files()
 
+    def _check_db_open(self) -> bool:
+        db_open_filename = self._open_filename()
+        is_open = os.path.exists(db_open_filename)
+        if not is_open:
+            with open(db_open_filename, 'w'):
+                pass
+        return is_open
+
     def _init_db(self):
         os.makedirs(self._path, exist_ok=True)
-
         self._open_files()
+
+        if self._check_db_open():
+            self._repair_db()
+
         self._key_file.seek(0)
 
-        json_record = self._key_file.readline()
-        while json_record.strip() != '':
-            record = json.loads(json_record)
-            if record['type'] == 'set':
-                self._table[record['key']] = ValuePointer(
-                    timestamp=record['timestamp'],
-                    offset=record['offset'],
-                    size=record['size'],
-                    encoding=record['encoding'],
-                    expiration=-1 if 'expiration' not in record else record['expiration']
-                )
+        json_entry = self._key_file.readline()
+        while json_entry.strip() != '':
+            entry = json.loads(json_entry)
+            if entry['type'] == 'set':
+                self._table[entry['key']] = ValuePointer.from_entry(entry)
             else:
-                del self._table[record['key']]
+                del self._table[entry['key']]
 
-            json_record = self._key_file.readline()
+            json_entry = self._key_file.readline()
 
     def _read_value(self, ptr: ValuePointer, decode=True):
         self._value_file.seek(ptr.offset)
@@ -123,12 +150,12 @@ class ViperDB:
             return pickle.loads(encoded_value)
         return encoded_value
 
-    def _append_record(self, record: Dict[str, Any]):
-        data = json.dumps(record)
+    def _append_entry(self, entry: Dict[str, Any]):
+        data = json.dumps(entry)
         self._key_file.write(data + '\n')
 
-    def _checksum(self, record, encoded_value=None):
-        data = json.dumps(record).encode('ascii')
+    def _checksum(self, entry, encoded_value=None):
+        data = json.dumps(entry, sort_keys=True).encode('ascii')
         if encoded_value is not None:
             data = data + b":" + encoded_value
         return zlib.crc32(data)
@@ -144,31 +171,24 @@ class ViperDB:
             return None
         return self._read_value(self._table[key])
 
-    def _set(self, key: Hashable, value: Any, expiration=-1):
+    def _set(self, key: Hashable, value: Any, expiration=None):
         offset = self._seek_to_end()
         encoded_value = self._encode_value(value)
         encoding = self._get_encoding(value)
-        record = {
+        entry = {
             'type': 'set',
             'timestamp': get_timestamp(),
             'key': key,
             'encoding': encoding,
             'offset': offset,
-            'size': len(encoded_value)
+            'size': len(encoded_value),
+            **({'expiration': expiration} if expiration is not None else {})
         }
-        if expiration >= 0:
-            record['expiration'] = expiration
+        entry['checksum'] = self._checksum(entry, encoded_value)
 
-        record['checksum'] = self._checksum(record, encoded_value)
-        self._append_record(record)
+        self._append_entry(entry)
         self._value_file.write(encoded_value)
-        self._table[key] = ValuePointer(
-            timestamp=record['timestamp'],
-            offset=offset,
-            size=len(encoded_value),
-            encoding=encoding,
-            expiration=expiration
-        )
+        self._table[key] = ValuePointer.from_entry(entry)
 
     def set_with_expiration(self, key: Hashable, value: Any, expiration: int):
         with self._lock:
@@ -180,13 +200,13 @@ class ViperDB:
 
         self._seek_to_end()
         timestamp = get_timestamp()
-        record = {
+        entry = {
             'type': 'del',
             'timestamp': timestamp,
             'key': key
         }
-        record['checksum'] = self._checksum(record)
-        self._append_record(record)
+        entry['checksum'] = self._checksum(entry)
+        self._append_entry(entry)
         del self._table[key]
 
     def __getitem__(self, key: Hashable):
@@ -219,20 +239,11 @@ class ViperDB:
             value = self._read_value(ptr, decode=False)
             new_value_file.write(value)
 
-            new_record = {
-                'type': 'set',
-                'timestamp': ptr.timestamp,
-                'key': key,
-                'encoding': ptr.encoding,
-                'offset': offset,
-                'size': ptr.size,
-            }
-            if ptr.expiration >= 0:
-                new_record['expiration'] = ptr.expiration
-            new_record['checksum'] = self._checksum(new_record, value)
             ptr.offset = offset
+            new_entry = ptr.as_dict()
+            new_entry['checksum'] = self._checksum(new_entry, value)
 
-            new_key_file.write(json.dumps(new_record) + '\n')
+            new_key_file.write(json.dumps(new_entry) + '\n')
 
         self._swap_files(new_key_file, new_value_file)
 
@@ -245,8 +256,38 @@ class ViperDB:
 
     def _close(self):
         self._close_files()
+        os.remove(f'{self._path}/{DB_OPEN_FILE}')
         self._table.clear()
 
     def close(self):
         with self._lock:
             self._close()
+
+    def _repair_db(self):
+        self._remove_temp_files()
+        new_key_file = open(f'{self._path}/db.klog.tmp', 'a+')
+        new_value_file = open(f'{self._path}/db.vlog.tmp', 'ba+')
+
+        self._key_file.seek(0)
+        json_entry = self._key_file.readline()
+
+        while json_entry.strip() != '':
+            try:
+                entry = json.loads(json_entry)
+                encoded_value = None
+                if entry['type'] == 'set':
+                    encoded_value = self._read_value(ValuePointer.from_entry(entry), decode=False)
+
+                checksum = self._checksum({k: v for k, v in entry.items() if k != 'checksum'}, encoded_value)
+
+                if checksum != entry['checksum']:
+                    break
+
+                new_key_file.write(json_entry)
+                new_value_file.write(encoded_value)
+            except (json.JSONDecodeError, IOError):
+                break
+
+            json_entry = self._key_file.readline()
+
+        self._swap_files(new_key_file, new_value_file)
