@@ -60,13 +60,6 @@ class ViperDB:
         self._key_file = open(f'{self._path}/db.klog', 'a+')
         self._value_file = open(f'{self._path}/db.vlog', 'ba+')
 
-    def _remove_temp_files(self):
-        if os.path.exists(f'{self._path}/db.klog.tmp'):
-            os.remove(f'{self._path}/db.klog.tmp')
-
-        if os.path.exists(f'{self._path}/db.vlog.tmp'):
-            os.remove(f'{self._path}/db.vlog.tmp')
-
     def _flush(self):
         self._key_file.flush()
         self._value_file.flush()
@@ -264,11 +257,14 @@ class ViperDB:
             self._close()
 
     def _repair_db(self):
-        self._remove_temp_files()
         new_key_file = open(f'{self._path}/db.klog.tmp', 'a+')
         new_value_file = open(f'{self._path}/db.vlog.tmp', 'ba+')
 
+        new_key_file.truncate()
+        new_value_file.truncate()
+
         self._key_file.seek(0)
+
         json_entry = self._key_file.readline()
 
         while json_entry.strip() != '':
