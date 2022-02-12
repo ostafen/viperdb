@@ -274,6 +274,12 @@ class ViperDB:
         with self._lock:
             self._close()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, type, value, traceback):
+        self.close()
+
     def _repair_db(self):
         new_key_file, new_value_file = self._create_temp_files()
 
