@@ -247,7 +247,11 @@ class ViperDB:
             new_value_file.write(value)
 
             ptr.offset = offset
-            new_entry = ptr.as_dict()
+            new_entry = {
+                'type': 'set',
+                'key': key,
+                **ptr.as_dict()
+            }
             new_entry['checksum'] = self._checksum(new_entry, value)
 
             new_key_file.write(json.dumps(new_entry) + '\n')
