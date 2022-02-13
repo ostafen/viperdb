@@ -1,4 +1,4 @@
-# ViperDB
+# ViperDB :snake:
 
 [![codecov](https://codecov.io/gh/ostafen/viperdb/branch/main/graph/badge.svg?token=CXZTXRQ9YS)](https://codecov.io/gh/ostafen/viperdb)
 
