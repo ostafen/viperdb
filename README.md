@@ -50,5 +50,5 @@ db.close() # flush any pending write and close the database.
 
 ### Contribute
 
-ViperDB is a very recent project and, as such, it comes with no warranty.
+ViperDB is a very recent project. However, it is actively maintained to ensure high quality.
 If you find any bug, or have some suggestion, feel free to contribute by opening a new issue or making a pull request.
